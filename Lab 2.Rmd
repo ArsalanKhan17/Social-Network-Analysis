@@ -1,0 +1,122 @@
+---
+title: "Lab 2"
+author: "Arsalan Khan"
+date: "3/6/2021"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(igraph)
+library(tidyverse)
+```
+
+```{r data, include = FALSE, message = FALSE, warning = FALSE}
+classroom_att_data <- read_csv("G:/My Drive/Spring/Social Network Analysis/Lab 1/Classroom Data - 4 Waves/Classroom_2011_Attributes.csv", col_types = cols(Ethnicity = col_factor(),
+  Gender = col_factor(),
+  Group = col_factor()))
+
+classroom_net_data <- read_csv("G:/My Drive/Spring/Social Network Analysis/Lab 1/Classroom Data - 4 Waves/Classroom_2011_W4.csv")
+
+classroom_net_matrix <- as.matrix(classroom_net_data)
+
+classroom_net_graph <- graph.adjacency(classroom_net_matrix[,-1], mode="directed", weighted=NULL)
+
+vertex_attr(classroom_net_graph) <- classroom_att_data
+
+```
+
+
+## 1. Describe the social network(s) to me, in terms of how it was collected, what it represents and so forth. Also give me basic topography of the network: the nature of the ties; direction of ties; overall density; and if attributes are with the network, the distribution of the categories and variables of those attributes.
+
+This social network is about college students in an undergraduate course on social networks. Data on ties between the students was collected in four waves at different intervals over the 11 weeks of the course. Attribute data about the nodes in the network was also collected by having the students report it themselves and by using the instructor's records on the students. There are a total of $75$ nodes/students in the network. The student's were asked to pick from a list of all the other students in the class who they would consider close enough to be able to ask for a small favor like borrowing class notes. Ties in the network are measured as asymmetric and binary. 
+```{r density}
+
+edge_density(classroom_net_graph)
+```
+We see that the overall density of this network is about $0.16$. 
+
+```{r gender}
+table(classroom_att_data$Gender)
+```
+
+We see that the class had more women than men. 
+
+
+```{r ethnicity}
+table(factor(classroom_att_data$Ethnicity, levels = 1:4, labels = c('White', 'Hispanic', 'Asian', 'African American or Other')))
+```
+
+Above we see the breakdown of the nodes based on ethnicity. 
+
+## 2. Calculate degree centrality (in- and out-degree, too, if you have such data); closeness centrality; betweenness centrality; and eigenvector centrality. Correlate those measures of centrality. Highlight which nodes are most central and least central, along different dimensions.
+
+```{r}
+classroom_att_data <- merge(classroom_att_data,  #  Merge classroom_data
+                           data.frame(  # With a new data.frame
+                             ID = classroom_att_data$ID,
+                             in.deg= degree(classroom_net_graph, mode = c("in"), loops = FALSE, normalized = FALSE),
+                             out.deg= degree(classroom_net_graph, mode = c("out"), loops = FALSE, normalized = FALSE),
+                             btwn= betweenness(classroom_net_graph, directed = F),
+                             close = closeness(classroom_net_graph, mode = c("all")),
+                             eigen <- evcent(classroom_net_graph),
+                             bon <- bonpow(classroom_net_graph)
+                           ),
+                           by = 'ID')
+
+classroom_att_data <- classroom_att_data[,c(1:17, 39)]
+
+names(classroom_att_data)[names(classroom_att_data)=="bon....bonpow.classroom_net_graph."] <- "bon"
+```
+
+Using in-degree centrality measure. 
+
+```{r in-degree}
+head(classroom_att_data %>% arrange(desc(in.deg))) %>% select(c(ID:in.deg))
+```
+
+Using out.deg centrality measure.
+
+```{r out-degree}
+head(classroom_att_data %>% arrange(desc(out.deg)) %>% select(c(ID:Paper, out.deg)))
+```
+
+
+## 3a. If you have a network with attribute data, then state some hypothesis about how an attribute may be related to some (or all of the) measures of centrality. Explains why you think these two variables should be related.
+
+My first hypothesis is that the variation in a student's score on the last exam of the class can be explained by their out.degree measure. Also if a student has a high out.deg score then it's likely that they will have a high score on the last exam since they'll be more actively seeking out help from others in the class. The reason for using the last exam score as a dependent variable is that by that time during the semester students network positions have somewhat stabilized and are thus a more accurate representation of their final network position. 
+
+```{r SLR}
+summary(lm(E3 ~ out.deg, data = classroom_att_data))
+```
+From this simple regression model we see that there is indeed a positive relationship between out.degree centrality and a student's performance on the last exam. However the coefficient on out.degree centrality is not statistically significant and so we can't be sure of the this effect on the exam score.
+
+Below is a model that regresses students exams scores on the last exam against all measures of centrality. 
+
+```{r MLR}
+summary(lm(E3 ~ out.deg + in.deg + btwn + close + vector + bon, data = classroom_att_data))
+```
+We see that none of the centrality measures seem to be statistically significant at any reasonable level of significance which is a bit strange. 
+
+## 4. In either case, when you are done above, then consider alternate specifications of your variables and codings and decisions and models. What would you want to consider changing and why. If you can, report on what are the consequences of those changes?
+
+Perhaps it might make more sense to include other control variables such as a student's gender and their ethnicity. We can then study the effects of different centrality measures net of their gender and ethnicity.  
+```{r}
+summary(lm(E3 ~ out.deg + in.deg + btwn + close + vector + bon + Ethnicity + Gender, data = classroom_att_data))
+```
+From the above model summary we see that if a student is a male there exam score goes up by about $7.7$ points. Also being any race other than white has a negative impact on one's exam scores. 
+
+It might make more sense to aggregate a student's score across all three exams and use that as a dependent variable. 
+```{r}
+classroom_att_data <- cbind(classroom_att_data, "aggregate" = rowMeans(cbind(classroom_att_data$E1, classroom_att_data$E2, classroom_att_data$E3)))
+
+summary(lm(aggregate ~ out.deg + in.deg + btwn + close + vector + bon + Ethnicity + Gender, data = classroom_att_data))
+```
+We see that using an aggregate score doesn't really impact the coefficients in any significant way. Suggesting that perhaps the effect of network position is seen more on the last exam than the first 2. 
+
+## 5. Lastly, give your best conclusion as to what you learned from your analysis. Did it make sense, given your initial expectations? Why? Why not.
+
+My initial expectation was that a central position in one's ego network might have a very strong impact on a student's performance across the semester. While there is a positive impact of network centrality on student performance it doesn't seem to be too important for determining a student's performance (at least in this class). 
